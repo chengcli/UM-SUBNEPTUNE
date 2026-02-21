@@ -81,7 +81,7 @@ def initialize_isothermal(block: MeshBlock, config: dict) -> tuple[dict[str, tor
     for name in thermo_y.options.species():
         param[f"x{name}"] = float(problem.get(f"x{name}", 0.0))
 
-    hydro_w = setup_profile(block, param, method="isothermal")
+    hydro_w = setup_profile(block, param, method="pseudo-adiabat")
 
     # add random noise to IV1
     hydro_w[kIV1] += 1e-6 * torch.randn_like(hydro_w[kIV1])
@@ -151,7 +151,10 @@ def apply_tidal_forcing(block: MeshBlock, block_vars: dict[str, torch.Tensor], f
     cool_src = (forcing.mean_cooling_flux / (top_dz * top_depth)) * dt
 
     hydro_u[kIPR, ..., il : il + bot_depth] += heat_src.unsqueeze(-1)
-    hydro_u[kIPR, ..., iu + 1 - top_depth : iu + 1] -= cool_src
+    #hydro_u[kIPR, ..., iu + 1 - top_depth : iu + 1] -= cool_src
+
+    icool = int(il * 0.4 + iu * 0.6)
+    hydro_u[kIPR, ..., icool] -= cool_src
 
 
 def write_restart_manifest(
