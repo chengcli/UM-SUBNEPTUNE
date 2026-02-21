@@ -81,7 +81,7 @@ def initialize_isothermal(block: MeshBlock, config: dict) -> tuple[dict[str, tor
     for name in thermo_y.options.species():
         param[f"x{name}"] = float(problem.get(f"x{name}", 0.0))
 
-    hydro_w = setup_profile(block, param, method="isothermal")
+    hydro_w = setup_profile(block, param, method="pseudo-adiabat")
 
     # add random noise to IV1
     hydro_w[kIV1] += 1e-6 * torch.randn_like(hydro_w[kIV1])
