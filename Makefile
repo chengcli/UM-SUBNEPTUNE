@@ -7,7 +7,7 @@ DATE_STRING := $(shell date "+%Y-%m-%d")
 JOB := canoe$(date +%Y%m%d_%H%M%S)
 HOST := $${HOSTNAME}
 
-.PHONY: help env up down ps start build deploy finish log log1 log2 status status1 status2 mint upload node resource
+.PHONY: help env up down ps start build deploy finish log log1 log2 status status1 status2 mint upload node resource save load
 
 # Show help for each target
 help: ## Show this help message
