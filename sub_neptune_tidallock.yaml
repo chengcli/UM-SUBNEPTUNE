@@ -148,7 +148,7 @@ problem:
   Tmin: 200.
   Ps: 1.e6 # 10 bar at lower boundary
 
-  # Uniform initial water vapor profile (20% mole fraction)
+  # Uniform initial water vapor profile (10% mole fraction)
   xH2O: 0.1
 
   # Tidally locked forcing controls used by run_sub_neptune.py
