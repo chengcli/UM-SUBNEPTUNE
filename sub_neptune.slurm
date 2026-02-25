@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # ---- User settings ----
-SIF=${HOME}/chengcli/ubuntu22.04-cuda12.9-py3.10-canoe_2026-02-18.sif
+SIF=${HOME}/chengcli/ubuntu22.04-cuda12.9-py3.10-canoe_2026-02-23.sif
 PORT=29500
 
 # ---- Derive rendezvous info from Slurm allocation ----
