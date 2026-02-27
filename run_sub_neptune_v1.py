@@ -29,8 +29,8 @@ class ForcingState:
     cos_zenith_dayside: torch.Tensor
     absorbed_surface_flux: float
     mean_cooling_flux: float
+    top_depth: int
     bottom_depth: int
-    gaussian_cool_weights: torch.Tensor  # shape [nz_active], 1/m, normalised so sum(w_i*dz_i)=1
 
 
 def load_config(path: str) -> dict:
@@ -124,31 +124,12 @@ def build_tidal_forcing_state(block: MeshBlock, config: dict, device: torch.devi
     # exactly balances globally integrated dayside heating for a spherical planet.
     mean_cooling_flux = absorbed_surface_flux * 0.25
 
-    # Build Gaussian cooling weights over active vertical levels.
-    # Normalised so that sum(w_i * dz_i) = 1, which guarantees the total
-    # column-integrated cooling equals mean_cooling_flux per unit area.
-    il, iu = coord.il(), coord.iu()
-    x1v = coord.buffer("x1v")
-    dzf = coord.buffer("dx1f")
-    z_active = x1v[il : iu + 1]
-    dz_active = dzf[il : iu + 1]
-
-    z0 = float(problem.get("cooling_center_height", float(x1v[iu].item())))
-    sigma = float(
-        # Default: domain height / 8 gives a spread covering ~1/8 of the column
-        problem.get("cooling_sigma", float((x1v[iu] - x1v[il]).item()) / 8.0)
-    )
-
-    gaussian_weights = torch.exp(-0.5 * ((z_active - z0) / sigma) ** 2)
-    norm = (gaussian_weights * dz_active).sum()
-    gaussian_cool_weights = (gaussian_weights / norm).to(device)
-
     return ForcingState(
         cos_zenith_dayside=cos_zenith_dayside,
         absorbed_surface_flux=absorbed_surface_flux,
         mean_cooling_flux=mean_cooling_flux,
+        top_depth=int(problem.get("forcing_depth_top", 1)),
         bottom_depth=int(problem.get("forcing_depth_bottom", 1)),
-        gaussian_cool_weights=gaussian_cool_weights,
     )
 
 
@@ -160,18 +141,20 @@ def apply_tidal_forcing(block: MeshBlock, block_vars: dict[str, torch.Tensor], f
     hydro_u = block_vars["hydro_u"]
 
     bot_depth = max(1, forcing.bottom_depth)
+    top_depth = max(1, forcing.top_depth)
 
     bot_dz = dzf[il]
+    top_dz = dzf[iu]
 
     heat_flux_local = forcing.absorbed_surface_flux * forcing.cos_zenith_dayside
     heat_src = (heat_flux_local / (bot_dz * bot_depth)) * dt
-
-    # Gaussian cooling: weights are normalised so sum(w_i * dz_i) = 1,
-    # guaranteeing total column-integrated cooling equals mean_cooling_flux per unit area.
-    cool_src = forcing.mean_cooling_flux * forcing.gaussian_cool_weights * dt
+    cool_src = (forcing.mean_cooling_flux / (top_dz * top_depth)) * dt
 
     hydro_u[kIPR, ..., il : il + bot_depth] += heat_src.unsqueeze(-1)
-    hydro_u[kIPR, ..., il : iu + 1] -= cool_src
+    #hydro_u[kIPR, ..., iu + 1 - top_depth : iu + 1] -= cool_src
+
+    icool = int(il * 0.4 + iu * 0.6)
+    hydro_u[kIPR, ..., icool] -= cool_src
 
 
 def write_restart_manifest(
@@ -297,7 +280,7 @@ def main() -> None:
     print(
         "Forcing summary:",
         f"absorbed_surface_flux={forcing.absorbed_surface_flux:.3f} W/m^2,",
-        f"gaussian_cooling_flux={forcing.mean_cooling_flux:.3f} W/m^2",
+        f"uniform_top_cooling_flux={forcing.mean_cooling_flux:.3f} W/m^2",
     )
 
     tlim = float(config["integration"]["tlim"])

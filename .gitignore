@@ -6,3 +6,10 @@ output*
 
 # pt file
 thermo_*.pt
+
+# slurm files
+*.out
+*.err
+
+# restart file
+*.restart
