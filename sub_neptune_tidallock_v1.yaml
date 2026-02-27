@@ -148,7 +148,7 @@ problem:
   Tmin: 200.
   Ps: 1.e6 # 10 bar at lower boundary
 
-  # Uniform initial water vapor profile (10% mole fraction)
+  # Uniform initial water vapor profile (20% mole fraction)
   xH2O: 0.1
 
   # Tidally locked forcing controls used by run_sub_neptune.py
@@ -158,7 +158,3 @@ problem:
   substellar_lat_deg: 0.0
   forcing_depth_bottom: 1
   forcing_depth_top: 1
-
-  # Gaussian cooling profile parameters
-  cooling_center_height: 1.6928e7  # height at which cooling peaks [m]
-  cooling_sigma: 30.e3              # Gaussian width (standard deviation) [m]

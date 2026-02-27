@@ -28,5 +28,6 @@ torchrun \
   --master_addr="${MASTER_ADDR}" \
   --master_port="${MASTER_PORT}" \
   ./run_sub_neptune.py \
+    --restart-name sub_neptune_tidallock.day110_uniform_cooling.restart \
     --config=sub_neptune_tidallock.yaml \
     --output-dir=/data/ > /data/node${NODE_RANK}.log 2>&1
