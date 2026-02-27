@@ -158,3 +158,7 @@ problem:
   substellar_lat_deg: 0.0
   forcing_depth_bottom: 1
   forcing_depth_top: 1
+
+  # Gaussian cooling profile parameters
+  cooling_center_height: 1.35e7  # height at which cooling peaks [m]
+  cooling_sigma: 5.e4            # Gaussian width (standard deviation) [m]
