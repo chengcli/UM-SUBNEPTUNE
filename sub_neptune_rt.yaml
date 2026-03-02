@@ -132,16 +132,14 @@ problem:
   Tmin: 200.
   Ps: 1.e6
   xH2O: 0.1
-  stellar_flux_nadir: 2000.0
   substellar_lon_deg: 0.0
   substellar_lat_deg: 0.0
 
 radiative-transfer:
   update_dt: 3600.0
-  shortwave_band: sw
-  longwave_band: lw
   sw_surface_albedo: 0.0
   lw_surface_albedo: 0.0
+  stellar_flux_nadir: 1800.0
 
 opacities:
   grey-sw:

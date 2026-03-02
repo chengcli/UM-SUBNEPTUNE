@@ -27,8 +27,6 @@ torch.set_default_dtype(torch.float64)
 @dataclass
 class RadiativeTransferConfig:
     update_dt: float
-    shortwave_band: str
-    longwave_band: str
     sw_surface_albedo: float
     lw_surface_albedo: float
     stellar_flux_nadir: float
@@ -219,6 +217,12 @@ def _extract_species_weights_from_config(config: dict[str, Any]) -> list[float]:
         out.append(mw)
     return out
 
+def _parse_band_range(config: dict[str, Any], key: str) -> Tuple[float, float]:
+    for band in config["bands"]:
+        if band["name"] == key:
+            return band["range"]
+    raise ValueError(f"Band '{key}' not found in config 'bands' section.")
+
 
 def create_grey_opacities(config: dict[str, Any]) -> Tuple[torch.nn.Module,
                                                            torch.nn.Module]:
@@ -249,12 +253,6 @@ def create_grey_opacities(config: dict[str, Any]) -> Tuple[torch.nn.Module,
         opacity_models.append(torch.compile(model))
     return opacity_models
 
-def _parse_band_range(config: dict[str, Any], key: str) -> Tuple[float, float]:
-    for band in config["bands"]:
-        if band["name"] == key:
-            return band["range"]
-    raise ValueError(f"Band '{key}' not found in config 'bands' section.")
-
 def create_toon_solvers(config: dict[str, Any]) -> Tuple[torch.nn.Module,
                                                          torch.nn.Module]:
     # shortwave solver
@@ -278,8 +276,6 @@ def build_rt_state(
     rt_cfg_raw = config.get("radiative-transfer", {})
     cfg = RadiativeTransferConfig(
         update_dt=float(rt_cfg_raw.get("update_dt", 3600.0)),
-        shortwave_band=str(rt_cfg_raw.get("shortwave_band", "sw")),
-        longwave_band=str(rt_cfg_raw.get("longwave_band", "lw")),
         sw_surface_albedo=float(rt_cfg_raw.get("sw_surface_albedo", 0.0)),
         lw_surface_albedo=float(rt_cfg_raw.get("lw_surface_albedo", 0.0)),
         stellar_flux_nadir=float(rt_cfg_raw.get("stellar_flux_nadir", 1800.)),
@@ -543,11 +539,6 @@ def parse_args() -> argparse.Namespace:
             "sub_neptune_rt_doublegrey.00005.restart or sub_neptune_rt_doublegrey.final.restart)"
         ),
     )
-    p.add_argument(
-        "--rebuild-jit",
-        action="store_true",
-        help="Rebuild JIT opacity .pt files even if they already exist.",
-    )
     return p.parse_args()
 
 
@@ -576,7 +567,6 @@ def main() -> None:
         "RT forcing summary:",
         f"stellar_flux_nadir={rt_state.cfg.stellar_flux_nadir:.3f} W/m^2,",
         f"rt_update_dt={rt_state.cfg.update_dt:.1f} s,",
-        f"sw_band={rt_state.cfg.shortwave_band}, lw_band={rt_state.cfg.longwave_band}",
     )
 
     tlim = float(config["integration"]["tlim"])
