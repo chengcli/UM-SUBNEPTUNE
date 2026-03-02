@@ -93,8 +93,7 @@ class GreyOpacity(torch.nn.Module):
         nlyr = conc.shape[1]
 
         # extinction = rho * kappa(pres)
-        mw = self.species_weights.to(device=conc.device, dtype=conc.dtype)
-        rho = (conc * mw.view(1, 1, -1)).sum(dim=-1)
+        rho = (conc * self.species_weights.view(1, 1, -1)).sum(dim=-1)
 
         kappa = self.kappa_a * torch.pow(pres, self.kappa_b)
         kappa = torch.clamp(kappa, min=self.kappa_cut)
@@ -234,6 +233,7 @@ def create_grey_opacities(config: dict[str, Any]) -> Tuple[torch.nn.Module,
         files = spec.get("data", [])
         if not files:
             raise ValueError(f"Opacity '{name}' is type=jit but has no data files.")
+        out_file = Path(files[0])
 
         nmom = int(spec.get("nmom", 1))
         params = spec.get("parameters", {})
@@ -281,9 +281,6 @@ def build_rt_state(
         stellar_flux_nadir=float(rt_cfg_raw.get("stellar_flux_nadir", 1800.)),
     )
 
-    grey_sw, grey_lw = create_grey_opacities(config)
-    toon_sw, toon_lw = create_toon_solvers(config)
-
     coord = block.module("coord")
     il, iu = coord.il(), coord.iu()
     nlyr = iu - il + 1
@@ -300,6 +297,15 @@ def build_rt_state(
 
     cosz = _build_local_cos_zenith(block, config)
     last_heating = torch.zeros((ny, nx, nlyr), device=cosz.device)
+
+    grey_sw, grey_lw = create_grey_opacities(config)
+    toon_sw, toon_lw = create_toon_solvers(config)
+
+    grey_sw.to(cosz.device)
+    grey_lw.to(cosz.device)
+
+    toon_sw.to(cosz.device)
+    toon_lw.to(cosz.device)
 
     return RadiativeTransferState(
         cfg=cfg,
@@ -324,12 +330,12 @@ def _compute_shortwave_rt(rt_state: RadiativeTransferState,
     bc: dict[str, torch.Tensor] = {
         f"fbeam": (
             rt_state.cfg.stellar_flux_nadir
-            * torch.ones((rt_state.sw_nwave, ncol), device=conc_i.device)
+            * torch.ones((1, ncol), device=conc_i.device) # (nwave, ncol)
         ),
-        f"umu0": rt_state.cos_zenith_dayside.view(ncol),
+        f"umu0": rt_state.cos_zenith_dayside.view(ncol), # (ncol,)
         f"albedo": (
             rt_state.cfg.sw_surface_albedo
-            * torch.ones((rt_state.sw_nwave, ncol), device=conc_i.device)
+            * torch.ones((1, ncol), device=conc_i.device) # (nwave, ncol)
         ),
     }
 
@@ -351,10 +357,11 @@ def _compute_longwave_rt(rt_state: RadiativeTransferState,
     bc: dict[str, torch.Tensor] = {
         f"albedo": (
             rt_state.cfg.lw_surface_albedo
-            * torch.ones((rt_state.lw_nwave, ncol), device=conc_i.device)
+            * torch.ones((1, ncol), device=conc_i.device) # (nwave, ncol)
         ),
     }
 
+    # (ncol, nlyr, nspecies) -> (nwave, ncol, nlyr, nprop)
     prop = rt_state.grey_lw(conc_i, pres_i, temp_i)
 
     # extinction [1/m] -> optical thickness [unitless]
