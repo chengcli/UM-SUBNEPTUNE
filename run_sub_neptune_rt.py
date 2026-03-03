@@ -73,6 +73,8 @@ class GreyOpacity(torch.nn.Module):
         self.kappa_b = float(kappa_b)
         self.kappa_cut = float(kappa_cut)
         self.nwave = int(nwave)
+        self.w0 = float(w0)
+        self.g = float(g)
         self.nprop = 2 + int(nmom)  # (extinction, w0, g)
 
     def forward(self, conc: torch.Tensor, pres: torch.Tensor, temp: torch.Tensor) -> torch.Tensor:
@@ -257,7 +259,7 @@ def create_toon_solvers(config: dict[str, Any]) -> Tuple[torch.nn.Module,
                                                          torch.nn.Module]:
     # shortwave solver
     op_sw = pyharp.ToonMcKay89Options()
-    toon_sw = pyharp.ToonMcKay89(opt_sw)
+    toon_sw = pyharp.ToonMcKay89(op_sw)
 
     # longwave solver
     op_lw = pyharp.ToonMcKay89Options()
@@ -327,6 +329,8 @@ def _compute_shortwave_rt(rt_state: RadiativeTransferState,
                           conc_i: torch.Tensor,
                           pres_i: torch.Tensor,
                           temp_i: torch.Tensor) -> torch.Tensor:
+    ncol = conc_i.shape[0]
+
     bc: dict[str, torch.Tensor] = {
         f"fbeam": (
             rt_state.cfg.stellar_flux_nadir
@@ -345,7 +349,12 @@ def _compute_shortwave_rt(rt_state: RadiativeTransferState,
     # extinction [1/m] -> optical thickness [unitless]
     prop *= rt_state.dz.view(1, 1, -1, 1)
 
-    result = rt_state.toon_sw(prop, **bc)  # (ncol, nlyr+1)
+    result = rt_state.toon_sw(prop, **bc).sum(0)  # (ncol, nlyr+1, 2)
+
+    # set net flux to zero in layers with zero cos(zenith) to avoid numerical issues
+    # with Toon solver output
+    zero_cosz_mask = (bc["umu0"] == 0.0).view(ncol, 1, 1).expand_as(result)
+    result[zero_cosz_mask] = 0.0
 
     # net flux = upward - downward
     return result[...,0] - result[...,1]
@@ -354,6 +363,8 @@ def _compute_longwave_rt(rt_state: RadiativeTransferState,
                          conc_i: torch.Tensor,
                          pres_i: torch.Tensor,
                          temp_i: torch.Tensor) -> None:
+    ncol, nlyr, _ = conc_i.shape
+
     bc: dict[str, torch.Tensor] = {
         f"albedo": (
             rt_state.cfg.lw_surface_albedo
@@ -374,7 +385,7 @@ def _compute_longwave_rt(rt_state: RadiativeTransferState,
     temf[:, 1:-1] = 0.5 * (temp_i[:, :-1] + temp_i[:, 1:]) # average for interior
     temf[:, -1] = 2 * temp_i[:, -1] - temp_i[:, -2]  # extrapolate top interface
 
-    result = rt_state.toon_lw(prop, temf=temf, **bc)  # (ncol, nlyr+1)
+    result = rt_state.toon_lw(prop, temf=temf, **bc).sum(0)  # (ncol, nlyr+1, 2)
 
     # net flux = upward - downward
     return result[...,0] - result[...,1]
@@ -404,9 +415,14 @@ def _compute_rt_heating(
     conc_i = conc[..., il : iu + 1, :].view(ncol, nlyr, conc.shape[-1])
     
     net_flux_sw = _compute_shortwave_rt(rt_state, conc_i, pres_i, temp_i)
-    net_flux_lw = _compute_longwave_rt(rt_state, conc_i, pres_i, temp_i)
+    #print('net_flux_sw shape:', net_flux_sw.shape, 'max:', net_flux_sw.max().item(),
+    #      'min:', net_flux_sw.min().item())
 
-    net_flux = net_flux_sw + net_flux_lw
+    net_flux_lw = _compute_longwave_rt(rt_state, conc_i, pres_i, temp_i)
+    #print('net_flux_lw shape:', net_flux_lw.shape, 'max:', net_flux_lw.max().item(),
+    #      'min:', net_flux_lw.min().item())
+
+    net_flux = net_flux_sw + net_flux_lw # (ncol, nlyr+1)
 
     # Volumetric heating [W/m^3] = -div(F) on a spherical shell using face areas.
     div_f = (
@@ -414,6 +430,7 @@ def _compute_rt_heating(
     ) / rt_state.vol
     heating = -div_f
 
+    # (ncol, nlyr) -> (ny, nx, nlyr)
     return heating.view(ny, nx, nlyr)
 
 
@@ -430,6 +447,9 @@ def update_rt_tendency_if_needed(
         return
 
     rt_state.last_heating = _compute_rt_heating(block, eos, thermo_y, thermo_x, block_vars, rt_state)
+    #print('rt_heating shape:', rt_state.last_heating.shape, 'max:',
+    #      rt_state.last_heating.max().item(), 'min:',
+    #      rt_state.last_heating.min().item())
     rt_state.next_update_time = current_time + max(rt_state.cfg.update_dt, 0.0)
 
     print(

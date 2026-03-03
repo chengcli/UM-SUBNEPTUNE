@@ -38,7 +38,7 @@ geometry:
     nghost: 3
 
 distribute:
-  backend: nccl
+  backend: gloo
   layout: cubed-sphere
   nb2: 1
   nb3: 1
@@ -79,7 +79,7 @@ integration:
   type: rk3
   cfl: 0.45
   implicit-scheme: 9
-  nlim: -1
+  nlim: 1
   tlim: 4.32e7 # 500 days
   ncycle_out: 1
 
@@ -152,7 +152,7 @@ opacities:
 
   grey-lw:
     type: jit
-    data: [doublegrey_lw.pt]
+    data: [grey_lw.pt]
     species: [dry, H2O, H2O(l), H2O(l,p)]
     jit_kwargs: [pres, temp]
     nmom: 1
