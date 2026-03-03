@@ -249,9 +249,9 @@ def create_grey_opacities(config: dict[str, Any]) -> Tuple[torch.nn.Module,
             nwave=1,
             nmom=nmom,
         )
-        scripted = torch.jit.script(model)
-        scripted.save(str(out_file))
-        print(f"Saved opacity for '{name}' -> {out_file}")
+        #scripted = torch.jit.script(model)
+        #scripted.save(str(out_file))
+        #print(f"Saved opacity for '{name}' -> {out_file}")
         opacity_models.append(torch.compile(model))
     return opacity_models
 
