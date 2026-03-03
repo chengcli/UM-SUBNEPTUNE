@@ -5,7 +5,7 @@ output*
 .env
 
 # pt file
-thermo_*.pt
+*.pt
 
 # slurm files
 *.out
@@ -13,3 +13,4 @@ thermo_*.pt
 
 # restart file
 *.restart
+
