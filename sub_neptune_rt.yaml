@@ -2,6 +2,7 @@ reference-state:
   Tref: 0.
   Pref: 1.e5
 
+# Background atmosphere: hydrogen + water vapor/cloud/precipitation
 species:
   - name: dry
     composition: { H: 2 }
@@ -24,17 +25,21 @@ species:
 
 geometry:
   type: gnomonic-equiangle
+
+  # Two-Earth-radius planet. Vertical extent chosen to span ~1e6 Pa to ~1e3 Pa
+  # (10 bar to 10 hPa) for an isothermal H2-rich atmosphere.
   bounds:
-    x1min: 1.2742e7
-    x1max: 1.3642e7
+    x1min: 1.6628e7
+    x1max: 1.7128e7
     x2min_pi: -0.25
     x2max_pi: 0.25
     x3min_pi: -0.25
     x3max_pi: 0.25
+
   cells:
     nx1: 100
-    nx2: 96
-    nx3: 96
+    nx2: 144
+    nx3: 144
     nghost: 3
 
 distribute:
@@ -53,12 +58,15 @@ dynamics:
     limiter: true
     max-iter: 30
     ftol: 1.e-6
+
   vertical-projection:
     type: temperature
     pressure-margin: 1.e-6
+
   reconstruct:
     vertical: { type: weno5, scale: true, shock: true }
     horizontal: { type: weno5, scale: true, shock: true }
+
   riemann-solver:
     type: hllc
 
@@ -81,7 +89,7 @@ integration:
   implicit-scheme: 9
   nlim: -1
   tlim: 4.32e7 # 500 days
-  ncycle_out: 1
+  ncycle_out: 10
 
 outputs:
   - type: restart
@@ -95,26 +103,32 @@ outputs:
 
 forcing:
   const-gravity:
-    grav1: -10.0
+    grav1: -13.5
+
+  # 33-day rotation/orbit period => omega = 2*pi / (33*86400) [s^-1]
   coriolis:
     type: xyz
-    omega1: 2.4240684e-6
+    omega1: 2.2037e-6
 
 sedimentation:
   radius:
     H2O(l,p): 1.0e-10
+
   density:
     H2O(l,p): 1000.
+
   const-vsed:
-    H2O(l,p): -2.0
+    H2O(l,p): -10.0
 
 reactions:
   - equation: H2O <=> H2O(l)
     type: nucleation
     rate-constant: { formula: h2o_ideal }
+
   - equation: H2O(l) => H2O(l,p)
     type: coagulation
-    rate-constant: { A: 0.01, b: 0, Ea_R: 0. }
+    rate-constant: { A: 3.e-6, b: 0, Ea_R: 0. }
+
   - equation: H2O(l,p) => H2O
     type: evaporation
     rate-constant:
@@ -128,9 +142,12 @@ reactions:
       }
 
 problem:
-  Ts: 800.
+  # Initial hydrostatic/isothermal state
+  Ts: 600.
   Tmin: 200.
-  Ps: 1.e6
+  Ps: 1.e6 # 10 bar at lower boundary
+
+  # Uniform initial water vapor profile (10% mole fraction)
   xH2O: 0.1
   substellar_lon_deg: 0.0
   substellar_lat_deg: 0.0
