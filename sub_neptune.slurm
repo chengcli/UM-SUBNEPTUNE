@@ -7,14 +7,15 @@
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=64G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.err
 
 set -euo pipefail
 
 # ---- User settings ----
-SIF=${HOME}/chengcli/ubuntu22.04-cuda12.9-py3.10-canoe_2026-02-23.sif
+SIF=${HOME}/chengcli/ubuntu22.04-cuda11.8-py3.10-canoe_2026-03-03.sif
+#SIF=${HOME}/chengcli/ubuntu22.04-cuda12.9-py3.10-canoe_2026-02-18.sif
 PORT=29500
 
 # ---- Derive rendezvous info from Slurm allocation ----
@@ -52,7 +53,7 @@ srun --nodes=${NNODES} --ntasks=${NNODES} --ntasks-per-node=1 \
       --node_rank=${NODE_RANK} \
       --master_addr='"${MASTER_ADDR}"' \
       --master_port='"${MASTER_PORT}"' \
-      ./run_sub_neptune.py \
-        --config=./sub_neptune_tidallock.yaml \
+      ./run_sub_neptune_rt.py \
+        --config=./sub_neptune_rt.yaml \
         --output-dir=./output
   '

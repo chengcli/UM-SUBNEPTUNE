@@ -252,7 +252,8 @@ def create_grey_opacities(config: dict[str, Any]) -> Tuple[torch.nn.Module,
         #scripted = torch.jit.script(model)
         #scripted.save(str(out_file))
         #print(f"Saved opacity for '{name}' -> {out_file}")
-        opacity_models.append(torch.compile(model))
+        #opacity_models.append(torch.compile(model))
+        opacity_models.append(model)
     return opacity_models
 
 def create_toon_solvers(config: dict[str, Any]) -> Tuple[torch.nn.Module,
