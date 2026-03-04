@@ -149,7 +149,7 @@ problem:
 
   # Uniform initial water vapor profile (10% mole fraction)
   xH2O: 0.1
-  substellar_lon_deg: 0.0
+  substellar_lon_deg: 90.0
   substellar_lat_deg: 0.0
 
 radiative-transfer:
