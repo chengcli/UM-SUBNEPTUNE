@@ -30,7 +30,7 @@ class ForcingState:
     absorbed_surface_flux: float
     mean_cooling_flux: float
     bottom_depth: int
-    gaussian_cool_weights: torch.Tensor  # shape [nz_active], 1/m, normalised so sum(w_i*dz_i)=1
+    gaussian_cool_weights: torch.Tensor  # shape [nz_active], 1/m, half-Gaussian half-uniform, normalised so sum(w_i*dz_i)=1
 
 
 def load_config(path: str) -> dict:
@@ -124,7 +124,9 @@ def build_tidal_forcing_state(block: MeshBlock, config: dict, device: torch.devi
     # exactly balances globally integrated dayside heating for a spherical planet.
     mean_cooling_flux = absorbed_surface_flux * 0.25
 
-    # Build Gaussian cooling weights over active vertical levels.
+    # Build half-Gaussian, half-uniform cooling weights over active vertical levels.
+    # Upper part (z >= z0): Gaussian profile
+    # Lower part (z < z0): Constant value equal to Gaussian peak
     # Normalised so that sum(w_i * dz_i) = 1, which guarantees the total
     # column-integrated cooling equals mean_cooling_flux per unit area.
     il, iu = coord.il(), coord.iu()
@@ -139,7 +141,15 @@ def build_tidal_forcing_state(block: MeshBlock, config: dict, device: torch.devi
         problem.get("cooling_sigma", float((x1v[iu] - x1v[il]).item()) / 8.0)
     )
 
+    # Compute Gaussian profile for all levels
     gaussian_weights = torch.exp(-0.5 * ((z_active - z0) / sigma) ** 2)
+
+    # Replace lower part (z < z0) with constant value equal to peak (which is 1.0)
+    # The peak of the Gaussian is at z0, where exp(0) = 1.0
+    mask_lower = z_active < z0
+    gaussian_weights[mask_lower] = 1.0
+
+    # Normalize so that sum(w_i * dz_i) = 1
     norm = (gaussian_weights * dz_active).sum()
     gaussian_cool_weights = (gaussian_weights / norm).to(device)
 
@@ -166,7 +176,7 @@ def apply_tidal_forcing(block: MeshBlock, block_vars: dict[str, torch.Tensor], f
     heat_flux_local = forcing.absorbed_surface_flux * forcing.cos_zenith_dayside
     heat_src = (heat_flux_local / (bot_dz * bot_depth)) * dt
 
-    # Gaussian cooling: weights are normalised so sum(w_i * dz_i) = 1,
+    # Half-Gaussian, half-uniform cooling: weights are normalised so sum(w_i * dz_i) = 1,
     # guaranteeing total column-integrated cooling equals mean_cooling_flux per unit area.
     cool_src = forcing.mean_cooling_flux * forcing.gaussian_cool_weights * dt
 
