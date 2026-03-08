@@ -35,23 +35,17 @@ echo "NODELIST=${SLURM_JOB_NODELIST}"
 # export NCCL_SOCKET_IFNAME=ib0            # or eno1/bond0/etc
 # export GLOO_SOCKET_IFNAME=ib0
 
+# activate python virtual environment
+source ${HOME}/pyenv/bin/activate
+
 # ---- Launch one torchrun per node; torchrun spawns 2 procs on that node ----
-srun --nodes=${NNODES} --ntasks=${NNODES} --ntasks-per-node=1 \
-  bash -lc '
-    set -euo pipefail
-
-    echo "Running on $(hostname)  SLURM_PROCID=${SLURM_PROCID}"
-    export NODE_RANK=${SLURM_PROCID}
-
-    source /opt/venv/bin/activate
-
-    torchrun \
+#srun --nodes=${NNODES} --ntasks=${NNODES} --ntasks-per-node=1 \
+srun torchrun \
       --nnodes='"${NNODES}"' \
       --nproc_per_node='"${GPUS_PER_NODE}"' \
       --node_rank=${NODE_RANK} \
       --master_addr='"${MASTER_ADDR}"' \
       --master_port='"${MASTER_PORT}"' \
-      ./run_sub_neptune_rt.py \
-        --config=./sub_neptune_rt.yaml \
+      ./run_sub_neptune.py \
+        --config=./sub_neptune.yaml \
         --output-dir=./output
-  '
