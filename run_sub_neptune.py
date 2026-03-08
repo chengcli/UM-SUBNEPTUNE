@@ -289,7 +289,7 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main(device) -> None:
+def main(device) -> MeshBlock:
     args = parse_args()
     config = load_config(args.config)
 
@@ -329,7 +329,7 @@ def main(device) -> None:
         basename=basename,
     )
 
-    block.finalize(block_vars, current_time)
+    return block
 
 
 if __name__ == "__main__":
@@ -348,6 +348,7 @@ if __name__ == "__main__":
         snapy.distributed.set_process_group(pg)
         device = torch.device("cpu")
 
-    main(device)
+    block = main(device)
 
+    block.finalize(block_vars, current_time)
     dist.destroy_process_group()

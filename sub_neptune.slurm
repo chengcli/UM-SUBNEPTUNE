@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sub-neptune
 #SBATCH --account=nrenno1
-#SBATCH --partition=spgpu
+#SBATCH --partition=gpu,spgpu
 #SBATCH --nodes=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:2
