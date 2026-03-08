@@ -43,7 +43,6 @@ geometry:
     nghost: 3
 
 distribute:
-  backend: nccl
   layout: cubed-sphere
   nb2: 1
   nb3: 1

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 import yaml
 import snapy
 from snapy import MeshBlock, MeshBlockOptions, kIV1, kICY, kIDN, kIPR
@@ -38,20 +39,20 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def select_device(block: MeshBlock) -> torch.device:
-    if torch.cuda.is_available() and block.options.layout().backend() == "nccl":
-        return torch.device(block.device())
-    return torch.device("cpu")
-
-
-def create_models(config_file: str, output_dir: str | None = None):
+def create_models(config_file: str,
+                  device: torch.device,
+                  output_dir: str | None = None):
     op = MeshBlockOptions.from_yaml(config_file)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         op.output_dir(output_dir)
 
+    if device.type == 'cpu':
+        op.layout().backend('gloo')
+    else:
+        op.layout().backend('nccl')
+
     block = MeshBlock(op)
-    device = select_device(block)
     block.to(device)
 
     thermo_y = block.module("hydro.eos.thermo")
@@ -63,7 +64,7 @@ def create_models(config_file: str, output_dir: str | None = None):
     kinet.to(device)
 
     eos = block.module("hydro.eos")
-    return block, eos, thermo_y, thermo_x, kinet, device
+    return block, eos, thermo_y, thermo_x, kinet 
 
 
 def initialize_isothermal(block: MeshBlock, config: dict) -> tuple[dict[str, torch.Tensor], float]:
@@ -288,11 +289,12 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def main() -> None:
+def main(device) -> None:
     args = parse_args()
     config = load_config(args.config)
 
-    block, eos, thermo_y, thermo_x, kinet, device = create_models(args.config, args.output_dir)
+    block, eos, thermo_y, thermo_x, kinet = create_models(
+        args.config, device, args.output_dir)
 
     if args.restart_name:
         block_vars, current_time = block.initialize_from_restart(args.restart_name)
@@ -331,4 +333,21 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # use cuda if available
+    if torch.cuda.is_available():
+        local_rank = int(os.environ["LOCAL_RANK"])
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+
+        dist.init_process_group(backend="cpu:gloo,cuda:nccl", device_id=device)
+        pg = dist.distributed_c10d._get_default_group()
+        snapy.distributed.set_process_group(pg)
+    else:
+        dist.init_process_group(backend="gloo")
+        pg = dist.distributed_c10d._get_default_group()
+        snapy.distributed.set_process_group(pg)
+        device = torch.device("cpu")
+
+    main(device)
+
+    dist.destroy_process_group()

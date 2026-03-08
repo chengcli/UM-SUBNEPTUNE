@@ -14,8 +14,6 @@
 set -euo pipefail
 
 # ---- User settings ----
-SIF=${HOME}/chengcli/ubuntu22.04-cuda11.8-py3.10-canoe_2026-03-03.sif
-#SIF=${HOME}/chengcli/ubuntu22.04-cuda12.9-py3.10-canoe_2026-02-18.sif
 PORT=29500
 
 # ---- Derive rendezvous info from Slurm allocation ----
@@ -39,7 +37,7 @@ echo "NODELIST=${SLURM_JOB_NODELIST}"
 
 # ---- Launch one torchrun per node; torchrun spawns 2 procs on that node ----
 srun --nodes=${NNODES} --ntasks=${NNODES} --ntasks-per-node=1 \
-  singularity exec --nv "${SIF}" bash -lc '
+  bash -lc '
     set -euo pipefail
 
     echo "Running on $(hostname)  SLURM_PROCID=${SLURM_PROCID}"
