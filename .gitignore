@@ -14,3 +14,5 @@ output*
 # restart file
 *.restart
 
+# cache
+__pycache__

@@ -190,6 +190,8 @@ def apply_tidal_forcing(
     hydro_u[kIPR, ..., il : il + bot_depth] += heat_src.unsqueeze(-1)
     hydro_u[kIPR, ..., il : iu + 1] -= cool_src
 
+    # re-apply boundary conditions
+    block.apply_hydro_bc(hydro_u, type=kConserved)
 
 def write_restart_manifest(
     checkpoint_dir: Path,
