@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 import yaml
 import snapy
-from snapy import Mesh, MeshOptions, kIV1, kICY, kIDN, kIPR
+from snapy import Mesh, MeshOptions, kIV1, kICY, kIDN, kIPR, kConserved
 from kintera import Kinetics, KineticsOptions, ThermoX
 from paddle import evolve_kinetics, setup_profile
 
