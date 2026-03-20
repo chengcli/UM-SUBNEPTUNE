@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 import yaml
 import snapy
-from snapy import MeshBlock, MeshBlockOptions, kIV1, kICY, kIDN, kIPR
+from snapy import Mesh, MeshOptions, kIV1, kICY, kIDN, kIPR
 from kintera import Kinetics, KineticsOptions, ThermoX
 from paddle import evolve_kinetics, setup_profile
 
@@ -38,21 +38,22 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def select_device(block: MeshBlock) -> torch.device:
+def select_device(block: snapy.MeshBlock) -> torch.device:
     if torch.cuda.is_available() and block.options.layout().backend() == "nccl":
-        return torch.device(block.device())
+        return torch.device(block.options.device_str())
     return torch.device("cpu")
 
 
 def create_models(config_file: str, output_dir: str | None = None):
-    op = MeshBlockOptions.from_yaml(config_file)
+    op = MeshOptions.from_yaml(config_file)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
-        op.output_dir(output_dir)
+        op.block().output_dir(output_dir)
 
-    block = MeshBlock(op)
+    mesh = Mesh(op)
+    block = mesh.blocks[0]
     device = select_device(block)
-    block.to(device)
+    mesh.to(device)
 
     thermo_y = block.module("hydro.eos.thermo")
     thermo_x = ThermoX(thermo_y.options)
@@ -63,10 +64,10 @@ def create_models(config_file: str, output_dir: str | None = None):
     kinet.to(device)
 
     eos = block.module("hydro.eos")
-    return block, eos, thermo_y, thermo_x, kinet, device
+    return mesh, eos, thermo_y, thermo_x, kinet, device
 
 
-def initialize_isothermal(block: MeshBlock, config: dict) -> tuple[dict[str, torch.Tensor], float]:
+def initialize_isothermal(mesh: Mesh, config: dict) -> tuple[list[dict[str, torch.Tensor]], float]:
     grav = -float(config["forcing"]["const-gravity"]["grav1"])
     problem = config["problem"]
 
@@ -77,27 +78,31 @@ def initialize_isothermal(block: MeshBlock, config: dict) -> tuple[dict[str, tor
         "grav": grav,
     }
 
-    thermo_y = block.module("hydro.eos.thermo")
+    thermo_y = mesh.blocks[0].module("hydro.eos.thermo")
     for name in thermo_y.options.species():
         param[f"x{name}"] = float(problem.get(f"x{name}", 0.0))
 
-    hydro_w = setup_profile(block, param, method="pseudo-adiabat")
+    mesh_vars: list[dict[str, torch.Tensor]] = []
+    for block in mesh.blocks:
+        hydro_w = setup_profile(block, param, method="pseudo-adiabat")
 
-    # add random noise to IV1
-    hydro_w[kIV1] += 1e-6 * torch.randn_like(hydro_w[kIV1])
+        # add random noise to IV1
+        hydro_w[kIV1] += 1e-6 * torch.randn_like(hydro_w[kIV1])
 
-    return block.initialize({"hydro_w": hydro_w})
+        mesh_vars.append({"hydro_w": hydro_w})
+
+    return mesh.initialize(mesh_vars)
 
 
-def _resolve_local_face_name(block: MeshBlock) -> str:
-    layout = snapy.distributed.get_layout()
-    rank = int(snapy.distributed.get_rank())
+def _resolve_local_face_name(block: snapy.MeshBlock) -> str:
+    layout = block.get_layout()
+    rank = int(layout.options.rank())
     loc = layout.loc_of(rank)
     face_id = int(loc[2])
     return snapy.coord.get_cs_face_name(face_id)
 
 
-def build_tidal_forcing_state(block: MeshBlock, config: dict, device: torch.device) -> ForcingState:
+def build_tidal_forcing_state(block: snapy.MeshBlock, config: dict, device: torch.device) -> ForcingState:
     coord = block.module("coord")
     x2v = coord.buffer("x2v")
     x3v = coord.buffer("x3v")
@@ -162,7 +167,9 @@ def build_tidal_forcing_state(block: MeshBlock, config: dict, device: torch.devi
     )
 
 
-def apply_tidal_forcing(block: MeshBlock, block_vars: dict[str, torch.Tensor], forcing: ForcingState, dt: float) -> None:
+def apply_tidal_forcing(
+    block: snapy.MeshBlock, block_vars: dict[str, torch.Tensor], forcing: ForcingState, dt: float
+) -> None:
     coord = block.module("coord")
     il, iu = coord.il(), coord.iu()
     dzf = coord.buffer("dx1f")
@@ -217,47 +224,53 @@ def write_restart_manifest(
     with open(manifest_file, "w", encoding="utf-8") as f:
         yaml.safe_dump(payload, f, sort_keys=False)
 
-
 def run_simulation(
-    block: MeshBlock,
+    mesh: Mesh,
     eos,
     thermo_y,
     thermo_x: ThermoX,
     kinet: Kinetics,
-    block_vars: dict[str, torch.Tensor],
+    mesh_vars: list[dict[str, torch.Tensor]],
     current_time: float,
-    tlim: float,
-    forcing: ForcingState,
+    forcing_states: list[ForcingState],
     config_file: str,
     output_dir: str,
     basename: str,
-) -> tuple[dict[str, torch.Tensor], float]:
-    block.options.intg().tlim(tlim)
+) -> tuple[list[dict[str, torch.Tensor]], float]:
+    intg = mesh.module("block0.intg")
+    tlim = float(load_config(config_file)["integration"]["tlim"])
+    intg.options.tlim(tlim)
 
     next_checkpoint_day = int(current_time // (10.0 * SECONDS_PER_DAY)) * 10 + 10
     checkpoint_dir = Path(output_dir) / "restart_checkpoints"
 
-    block.make_outputs(block_vars, current_time)
+    mesh.make_outputs(mesh_vars, current_time)
 
-    while not block.intg.stop(block.inc_cycle(), current_time):
-        dt = block.max_time_step(block_vars)
-        block.print_cycle_info(block_vars, current_time, dt)
+    cycle = 0
+    while not intg.stop(cycle, current_time):
+        cycle += 1
+        mesh.set_cycle(cycle)
 
-        for stage in range(len(block.intg.stages)):
-            block.forward(block_vars, dt, stage)
-            apply_tidal_forcing(block, block_vars, forcing, dt)
+        dt = mesh.max_time_step(mesh_vars)
+        mesh.print_cycle_info(mesh_vars, current_time, dt)
 
-        err = block.check_redo(block_vars)
+        for stage in range(len(intg.stages)):
+            mesh.forward(mesh_vars, dt, stage)
+            for block, block_vars, forcing in zip(mesh.blocks, mesh_vars, forcing_states):
+                apply_tidal_forcing(block, block_vars, forcing, dt)
+
+        err = mesh.check_redo(mesh_vars)
         if err > 0:
             continue
         if err < 0:
             break
 
-        del_rho = evolve_kinetics(block_vars["hydro_w"], eos, thermo_x, thermo_y, kinet, dt)
-        block_vars["hydro_u"][kICY:] += del_rho
+        for block_vars in mesh_vars:
+            del_rho = evolve_kinetics(block_vars["hydro_w"], eos, thermo_x, thermo_y, kinet, dt)
+            block_vars["hydro_u"][kICY:] += del_rho
 
         current_time += dt
-        block.make_outputs(block_vars, current_time)
+        mesh.make_outputs(mesh_vars, current_time)
 
         while current_time >= next_checkpoint_day * SECONDS_PER_DAY:
             write_restart_manifest(
@@ -270,7 +283,7 @@ def run_simulation(
             )
             next_checkpoint_day += 10
 
-    return block_vars, current_time
+    return mesh_vars, current_time
 
 
 def parse_args() -> argparse.Namespace:
@@ -292,42 +305,41 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
 
-    block, eos, thermo_y, thermo_x, kinet, device = create_models(args.config, args.output_dir)
+    mesh, eos, thermo_y, thermo_x, kinet, device = create_models(args.config, args.output_dir)
 
     if args.restart_name:
-        block_vars, current_time = block.initialize_from_restart(args.restart_name)
+        mesh_vars, current_time = mesh.initialize_from_restart(args.restart_name)
     else:
-        block_vars, current_time = initialize_isothermal(block, config)
+        mesh_vars, current_time = initialize_isothermal(mesh, config)
 
-    for key, data in block_vars.items():
-        if isinstance(data, torch.Tensor):
-            print(f"{key}: shape={tuple(data.shape)} dtype={data.dtype} device={data.device}")
+    for i, block_vars in enumerate(mesh_vars):
+        for key, data in block_vars.items():
+            if isinstance(data, torch.Tensor):
+                print(f"block[{i}] {key}: shape={tuple(data.shape)} dtype={data.dtype} device={data.device}")
 
-    forcing = build_tidal_forcing_state(block, config, device)
+    forcing_states = [build_tidal_forcing_state(block, config, device) for block in mesh.blocks]
     print(
         "Forcing summary:",
-        f"absorbed_surface_flux={forcing.absorbed_surface_flux:.3f} W/m^2,",
-        f"gaussian_cooling_flux={forcing.mean_cooling_flux:.3f} W/m^2",
+        f"absorbed_surface_flux={forcing_states[0].absorbed_surface_flux:.3f} W/m^2,",
+        f"gaussian_cooling_flux={forcing_states[0].mean_cooling_flux:.3f} W/m^2",
     )
 
-    tlim = float(config["integration"]["tlim"])
     basename = Path(args.config).stem
-    block_vars, current_time = run_simulation(
-        block=block,
+    mesh_vars, current_time = run_simulation(
+        mesh=mesh,
         eos=eos,
         thermo_y=thermo_y,
         thermo_x=thermo_x,
         kinet=kinet,
-        block_vars=block_vars,
+        mesh_vars=mesh_vars,
         current_time=current_time,
-        tlim=tlim,
-        forcing=forcing,
+        forcing_states=forcing_states,
         config_file=args.config,
         output_dir=args.output_dir,
         basename=basename,
     )
 
-    block.finalize(block_vars, current_time)
+    mesh.finalize(mesh_vars, current_time)
 
 
 if __name__ == "__main__":
